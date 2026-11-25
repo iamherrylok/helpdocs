@@ -1,0 +1,75 @@
+name: Publish Custom Command Docs
+
+on:
+  repository_dispatch:
+    types: [publish-custom-command-docs]
+
+concurrency:
+  group: publish-custom-command-docs
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout docs repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.DOCS_PUSH_PAT }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Apply docs, commit and push with conflict-free retry
+        env:
+          MANIFEST_URL: ${{ github.event.client_payload.manifestUrl }}
+          PKG_KEY: ${{ github.event.client_payload.packageKey }}
+          PKG_VER: ${{ github.event.client_payload.version }}
+        run: |
+          git config user.name "OctopusRPA Bot"
+          git config user.email "bot@octoparse.ai"
+
+          curl -fsSL "$MANIFEST_URL" -o /tmp/manifest.json
+
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git reset --hard origin/main
+
+            MANIFEST_FILE=/tmp/manifest.json node .github/scripts/apply-custom-command-docs.mjs
+
+            git add -A
+            if git diff --cached --quiet; then
+              echo "No documentation changes detected."
+              exit 0
+            fi
+
+            git commit -m "docs(custom-commands): publish ${PKG_KEY} v${PKG_VER}"
+            if git push origin main; then
+              echo "Successfully pushed on attempt ${attempt}."
+              exit 0
+            fi
+
+            echo "Push rejected (remote updated concurrently) on attempt ${attempt}, retrying..."
+            sleep 2
+          done
+
+          echo "Failed to push after 3 attempts."
+          exit 1
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          PKG_KEY: ${{ github.event.client_payload.packageKey }}
+          PKG_VER: ${{ github.event.client_payload.version }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then
+            exit 0
+          fi
+          curl -sS -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\":\"[Mintlify Docs Publish Failed] package=${PKG_KEY} version=${PKG_VER} run=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}"
