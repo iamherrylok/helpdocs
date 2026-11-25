@@ -17,7 +17,15 @@
       },
       {
         "group": "Custom Commands",
-        "pages": []
+        "pages": [
+          {
+            "group": "Salesforce Connector Demo",
+            "pages": [
+              "custom-commands/mintlify-e2e-demo-20261125081200/create-lead",
+              "custom-commands/mintlify-e2e-demo-20261125081200/update-lead"
+            ]
+          }
+        ]
       }
     ]
   }
